@@ -1,0 +1,16 @@
+# Nixpacks configuration for Railway
+[phases.setup]
+nixPkgs = ["nodejs"]
+
+[phases.install]
+cmds = ["npm install"]
+
+[phases.build]
+cmds = ["npm run build"]
+
+[start]
+cmd = "npm start"
+
+[variables]
+PORT = "8080"
+NODE_ENV = "production"
