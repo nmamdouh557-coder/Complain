@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 import { v4 as uuidv4 } from 'uuid';
@@ -14,7 +15,9 @@ const __dirname = path.dirname(__filename);
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 8080;
+
+  app.set('trust proxy', 1); // Trust Railway's proxy
 
   const safeParse = (val: any) => {
     if (typeof val === 'string') {
@@ -259,8 +262,8 @@ async function startServer() {
       complaint_comment TEXT,
       status TEXT NOT NULL DEFAULT 'Open',
       priority TEXT NOT NULL DEFAULT 'medium',
-      is_escalated BOOLEAN NOT NULL DEFAULT 0,
-      is_processed BOOLEAN NOT NULL DEFAULT 0,
+      is_escalated BOOLEAN NOT NULL DEFAULT FALSE,
+      is_processed BOOLEAN NOT NULL DEFAULT FALSE,
       validation_status TEXT,
       date_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       images TEXT DEFAULT '[]',
@@ -404,7 +407,7 @@ async function startServer() {
       title TEXT,
       message TEXT NOT NULL,
       type TEXT DEFAULT 'GENERAL',
-      is_read BOOLEAN DEFAULT 0,
+      is_read BOOLEAN DEFAULT FALSE,
       related_id TEXT,
       created_by_username TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -467,7 +470,7 @@ async function startServer() {
   
   await addColumnIfNotExists('complaints', 'brand', 'TEXT NOT NULL DEFAULT \'\'');
   await addColumnIfNotExists('complaints', 'branch', 'TEXT NOT NULL DEFAULT \'\'');
-  await addColumnIfNotExists('complaints', 'is_processed', 'BOOLEAN NOT NULL DEFAULT 0');
+  await addColumnIfNotExists('complaints', 'is_processed', 'BOOLEAN NOT NULL DEFAULT FALSE');
   await addColumnIfNotExists('complaints', 'creator_username', 'TEXT');
   await addColumnIfNotExists('complaints', 'closed_by_username', 'TEXT');
   await addColumnIfNotExists('complaints', 'closed_at', 'TIMESTAMP');
@@ -479,7 +482,7 @@ async function startServer() {
   await addColumnIfNotExists('complaints', 'amount_spent', 'TEXT');
   await addColumnIfNotExists('complaints', 'responsible_party', 'TEXT');
   await addColumnIfNotExists('complaints', 'branch_comment', 'TEXT');
-  await addColumnIfNotExists('complaints', 'is_escalated', 'BOOLEAN NOT NULL DEFAULT 0');
+  await addColumnIfNotExists('complaints', 'is_escalated', 'BOOLEAN NOT NULL DEFAULT FALSE');
   await addColumnIfNotExists('complaints', 'images', "TEXT DEFAULT '[]'");
   await addColumnIfNotExists('complaints', 'custom_fields', "TEXT DEFAULT '{}'");
   await addColumnIfNotExists('complaints', 'priority', "TEXT DEFAULT 'medium'");
@@ -852,7 +855,7 @@ initializeDatabase();
       } else if (status === 'closed') {
         query += " AND c.status = 'Closed'";
       } else if (status === 'escalated') {
-        query += " AND c.is_escalated = 1";
+        query += " AND c.is_escalated = TRUE";
       }
 
       query += ' ORDER BY c.date_time DESC LIMIT 1000';
@@ -1515,7 +1518,7 @@ initializeDatabase();
   app.patch('/api/notifications/read-all', async (req, res) => {
     try {
       const { userId } = req.body;
-      await db.run('UPDATE notifications SET is_read = 1 WHERE user_id = ?', [userId]);
+      await db.run('UPDATE notifications SET is_read = TRUE WHERE user_id = ?', [userId]);
       res.json({ success: true });
     } catch (error) {
       console.error('Read all notifications error:', error);
@@ -1878,23 +1881,61 @@ initializeDatabase();
     });
   });
 
+  // API 404 handler
+  app.all('/api/*', (req, res) => {
+    console.warn(`[API 404] ${req.method} ${req.path}`);
+    res.status(404).json({ message: `API route ${req.method} ${req.path} not found` });
+  });
+
+  // Generic Error Handler for API
+  app.use((err: any, req: any, res: any, next: any) => {
+    if (req.path.startsWith('/api/')) {
+      console.error('[API Internal Error]', err);
+      return res.status(err.status || 500).json({
+        message: err.message || 'Internal Server Error',
+        error: process.env.NODE_ENV === 'development' ? err : undefined
+      });
+    }
+    next(err);
+  });
+
   // Vite middleware for development
-  if (process.env.NODE_ENV !== 'production') {
+  if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
+    console.log('Running in DEVELOPMENT mode with Vite middleware');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
+    console.log('Running in PRODUCTION mode');
     const distPath = path.join(process.cwd(), 'dist');
+    
+    // Safety check for dist directory
+    if (!fs.existsSync(distPath)) {
+       console.warn('WARNING: dist directory not found! Static files will not be served.');
+       console.log('Make sure "npm run build" was executed successfully.');
+    } else {
+       console.log(`Serving static files from: ${distPath}`);
+    }
+
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      res.sendFile(indexPath, (err) => {
+        if (err) {
+          console.error(`Error sending index.html: ${err.message}`);
+          res.status(500).send('Error loading application. Please check server logs.');
+        }
+      });
     });
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`[Server] Domain: ${process.env.RAILWAY_STATIC_URL || 'localhost'}`);
+    console.log(`[Server] Port: ${PORT}`);
+    console.log(`[Server] Mode: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
 }
 
