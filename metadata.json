@@ -1,0 +1,5 @@
+{
+  "name": "Complaint Management System",
+  "description": "A professional full-stack dashboard for managing customer complaints with real-time tracking, manager approvals, and detailed PostgreSQL analytics.",
+  "requestFramePermissions": ["microphone"]
+}

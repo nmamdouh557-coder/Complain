@@ -1,0 +1,48 @@
+{
+  "entities": {
+    "Notification": {
+      "title": "Notification",
+      "description": "System notification for users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "recipientRole": { "type": "string", "description": "The role that should receive this notification" },
+        "message": { "type": "string" },
+        "createdBy": { "type": "string" },
+        "createdByUsername": { "type": "string" },
+        "complaintId": { "type": "string" },
+        "relatedId": { "type": "string" },
+        "brand": { "type": "string" },
+        "branch": { "type": "string" },
+        "type": { "type": "string", "enum": ["COMPLAINT", "CATERING", "PRE_ORDER"] },
+        "isRead": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["recipientRole", "message", "createdBy", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile state for CMS security",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "username": { "type": "string" },
+        "role": { "type": "string" },
+        "branch": { "type": "string" },
+        "brand": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Global notifications collection"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile collection"
+    }
+  }
+}

@@ -1,0 +1,111 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ==========================================
+    // GLOBAL HELPERS
+    // ==========================================
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Get current user's data from Firestore
+    // This is evaluated once and cached per query when used in list rules
+    function getUserData() {
+      let path = /databases/$(database)/documents/users/$(request.auth.uid);
+      return exists(path) ? get(path).data : {"role": "guest"};
+    }
+
+    function currentUserRole() {
+      return getUserData().role;
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ==========================================
+    // USERS COLLECTION
+    // ==========================================
+    
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['uid', 'role', 'username']) &&
+               data.uid == request.auth.uid &&
+               data.role is string &&
+               data.role.size() <= 50 &&
+               data.username is string &&
+               data.username.size() <= 100 &&
+               (data.get('email', '') is string) &&
+               data.get('updatedAt', request.time) == request.time;
+      }
+
+      allow get: if isSignedIn() && (request.auth.uid == userId || currentUserRole() == 'admin');
+      
+      // Users can sync their own profile
+      allow create: if isSignedIn() && request.auth.uid == userId && isValidUser(incoming());
+      
+      allow update: if isSignedIn() && request.auth.uid == userId && 
+                    isValidUser(incoming()) &&
+                    // Actions
+                    (
+                      // Action: Standard Profile Update
+                      (incoming().diff(existing()).affectedKeys().hasOnly(['email', 'username', 'role', 'branch', 'brand', 'updatedAt', 'uid']))
+                    );
+      
+      allow list: if isSignedIn() && currentUserRole() == 'admin';
+    }
+
+    // ==========================================
+    // NOTIFICATIONS COLLECTION
+    // ==========================================
+    
+    match /notifications/{notificationId} {
+      function isValidNotification(data) {
+        return data.keys().hasAll(['recipientRole', 'message', 'createdBy', 'createdAt', 'isRead']) &&
+               data.recipientRole is string &&
+               data.recipientRole.size() <= 50 &&
+               data.message is string &&
+               data.message.size() <= 500 &&
+               data.createdBy is string &&
+               data.createdBy.size() <= 128 &&
+               data.createdAt == request.time &&
+               data.isRead is bool;
+      }
+
+      // Anyone authenticated can create a notification
+      allow create: if isSignedIn() && isValidNotification(incoming());
+      
+      // Users can only see notifications sent to their specific role
+      // This enforces Secure List Queries: the client must specify the recipientRole filter
+      allow list: if isSignedIn() && resource.data.recipientRole == currentUserRole();
+      
+      allow get: if isSignedIn() && resource.data.recipientRole == currentUserRole();
+      
+      // Users can mark their own notifications as read
+      allow update: if isSignedIn() && 
+                    resource.data.recipientRole == currentUserRole() &&
+                    isValidNotification(incoming()) &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['isRead']) &&
+                    incoming().isRead == true &&
+                    // Terminal state: once read, can't be unread (though optional, fits pillar 3)
+                    existing().isRead == false;
+                    
+      allow delete: if false;
+    }
+  }
+}
